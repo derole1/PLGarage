@@ -265,6 +265,14 @@ namespace GameServer.Utils
                 return null;
         }
 
+        public static FileStream LoadPlayerCreationComplaintData(int id, string file)
+        {
+            if (File.Exists($"UGC/PlayerCreationComplaints/{id}/{file}"))
+                return File.OpenRead($"UGC/PlayerCreationComplaints/{id}/{file}");
+            else
+                return null;
+        }
+
         public static string CalculateMD5(int id, string file)
         {
             FileStream fileStream;

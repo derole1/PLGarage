@@ -1,15 +1,18 @@
+using System.IO;
+using System.Threading.RateLimiting;
 using GameServer.Implementation.Common;
 using GameServer.Models.Config;
 using GameServer.Utils;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System.Threading.RateLimiting;
 using Serilog;
 using Serilog.Events;
-using Microsoft.AspNetCore.Http;
 
 namespace GameServer
 {
@@ -27,6 +30,21 @@ namespace GameServer
         {
             services.AddControllers();
             services.AddDbContext<Database>();
+
+            services.AddCascadingAuthenticationState();
+            services.AddAuthentication(options =>
+            {
+                options.DefaultScheme = IdentityConstants.ApplicationScheme;
+                options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
+            })
+            .AddIdentityCookies();
+
+            services.AddIdentityCore<IdentityUser>(options => options.SignIn.RequireConfirmedAccount = false)
+                .AddRoles<IdentityRole>()
+                .AddEntityFrameworkStores<Database>()
+                .AddSignInManager()
+                .AddDefaultTokenProviders();
+
             if (ServerConfig.Instance.EnableRateLimiting)
                 services.AddRateLimiter(options => {  // TODO: Tweak
                     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>

@@ -2,10 +2,11 @@
 using GameServer.Models.PlayerData;
 using GameServer.Models.PlayerData.PlayerCreations;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 
 namespace GameServer.Utils
 {
-    public class Database : DbContext
+    public class Database : IdentityDbContext
     {
         public DbSet<User> Users { get; set; }
         public DbSet<HeartedProfile> HeartedProfiles { get; set; }

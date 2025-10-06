@@ -1,26 +1,30 @@
-﻿using GameServer.Implementation.Common;
-using GameServer.Models.Config;
-using GameServer.Models.PlayerData.PlayerCreations;
-using GameServer.Models.PlayerData;
-using GameServer.Utils;
-using Microsoft.AspNetCore.Mvc;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Microsoft.Extensions.Primitives;
+using GameServer.Implementation.Common;
+using GameServer.Models.Config;
+using GameServer.Models.PlayerData;
+using GameServer.Models.PlayerData.PlayerCreations;
+using GameServer.Utils;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Primitives;
+using Newtonsoft.Json;
 
-namespace GameServer.Controllers.Common
+namespace GameServer.Controllers.Api
 {
-    public class ApiController : Controller
+    public class CommonApiController : Controller
     {
         private readonly Database database;
+        private readonly SignInManager<IdentityUser> signInManager;
 
-        public ApiController(Database database)
+        public CommonApiController(Database database, SignInManager<IdentityUser> signInManager)
         {
             this.database = database;
+            this.signInManager = signInManager;
         }
 
         [HttpGet]
@@ -77,6 +81,25 @@ namespace GameServer.Controllers.Common
             }
 
             return Content(JsonConvert.SerializeObject(TrackIDs));
+        }
+
+        [HttpPost]
+        [Route("api/login")]
+        public async Task<IActionResult> Login(string login, string password)
+        {
+            var result = await signInManager.PasswordSignInAsync(login, password, false, false);
+            if (result.Succeeded)
+                return Ok();
+            else
+                return Unauthorized();
+        }
+
+        [HttpPost]
+        [Route("api/logout")]
+        public async Task<IActionResult> Logout(string login, string password)
+        {
+            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
+            return Ok();
         }
 
         protected override void Dispose(bool disposing)
