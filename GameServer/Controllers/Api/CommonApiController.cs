@@ -83,6 +83,15 @@ namespace GameServer.Controllers.Api
             return Content(JsonConvert.SerializeObject(TrackIDs));
         }
 
+        [HttpGet]
+        [Route("api/player_count")]
+        public IActionResult PlayerCount()
+        {
+            return Content(Session.GetSessions()
+                .Count()
+                .ToString());
+        }
+
         [HttpPost]
         [Route("api/login")]
         public async Task<IActionResult> Login(string login, string password)

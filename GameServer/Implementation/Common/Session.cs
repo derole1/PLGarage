@@ -302,6 +302,11 @@ namespace GameServer.Implementation.Common
             return session;
         }
 
+        public static IEnumerable<SessionInfo> GetSessions()
+        {
+            return Sessions.Select(x => x.Value);
+        }
+
         public static void AcceptPolicy(Guid SessionID) 
         {
             ClearSessions();
