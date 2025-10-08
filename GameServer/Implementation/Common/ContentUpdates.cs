@@ -7,6 +7,7 @@ using GameServer.Models.Response;
 using GameServer.Utils;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -55,16 +56,16 @@ namespace GameServer.Implementation.Common
                 resp.status.message = "Successful completion";
                 resp.response.Add(new content_update
                 {
-                    available_date = DateTime.UtcNow.ToString("yyyy-MM-ddThh:mm:sszzz"),
+                    available_date = TimeUtils.Now.ToString("yyyy-MM-ddThh:mm:sszzz"),
                     content_update_type = content_update_type.ToString(),
-                    created_at = DateTime.UtcNow.ToString("yyyy-MM-ddThh:mm:sszzz"),
+                    created_at = TimeUtils.Now.ToString("yyyy-MM-ddThh:mm:sszzz"),
                     data_md5 = BitConverter.ToString(MD5.Create().ComputeHash(Encoding.UTF8.GetBytes(GetHotlapData(database)))).Replace("-", "").ToLower(),
                     description = "",
                     has_been_uploaded = true,
                     id = 10542,
                     name = "",
                     platform = "PS3",
-                    updated_at = DateTime.UtcNow.ToString("yyyy-MM-ddThh:mm:sszzz"),
+                    updated_at = TimeUtils.Now.ToString("yyyy-MM-ddThh:mm:sszzz"),
                     uuid = Guid.NewGuid().ToString(),
                     content_url = "",
                     data = Convert.ToBase64String(Encoding.UTF8.GetBytes(GetHotlapData(database)))
@@ -77,16 +78,16 @@ namespace GameServer.Implementation.Common
                 resp.status.message = "Successful completion";
                 resp.response.Add(new content_update
                 {
-                    available_date = DateTime.UtcNow.ToString("yyyy-MM-ddThh:mm:sszzz"),
+                    available_date = TimeUtils.Now.ToString("yyyy-MM-ddThh:mm:sszzz"),
                     content_update_type = content_update_type.ToString(),
-                    created_at = DateTime.UtcNow.ToString("yyyy-MM-ddThh:mm:sszzz"),
+                    created_at = TimeUtils.Now.ToString("yyyy-MM-ddThh:mm:sszzz"),
                     data_md5 = BitConverter.ToString(MD5.Create().ComputeHash(Encoding.UTF8.GetBytes(GetTopTracksData(database)))).Replace("-", "").ToLower(),
                     description = "",
                     has_been_uploaded = true,
                     id = 10543,
                     name = "",
                     platform = "PS3",
-                    updated_at = DateTime.UtcNow.ToString("yyyy-MM-ddThh:mm:sszzz"),
+                    updated_at = TimeUtils.Now.ToString("yyyy-MM-ddThh:mm:sszzz"),
                     uuid = Guid.NewGuid().ToString(),
                     content_url = "",
                     data = Convert.ToBase64String(Encoding.UTF8.GetBytes(GetTopTracksData(database)))
@@ -96,13 +97,18 @@ namespace GameServer.Implementation.Common
             return resp.Serialize();
         }
 
-        private static HotLapData GetNewHotLap(Database database)
+        public static void GetNewHotLap(Database database)
         {
+            database.Scores.RemoveRange(database.Scores.Where(match => match.SubGroupId == 700 && match.IsMNR).ToList());
+
+            database.SaveChanges();
+
             Random random = new();
 
-            HotLapData result = null;
+            HotLapData hotlap = null;
 
             var candidates = database.PlayerCreations
+                .AsSplitQuery()
                 .Include(p => p.Downloads)
                 .OrderByDescending(p => p.Downloads.Count)
                 .Where(match => match.Type == PlayerCreationType.TRACK
@@ -120,16 +126,25 @@ namespace GameServer.Implementation.Common
                 else
                     trackid = candidates.FirstOrDefault();
 
-                result = new()
+                hotlap = new()
                 {
-                    SelectedAt = DateTime.UtcNow,
+                    SelectedAt = TimeUtils.Now,
                     TrackId = trackid
                 };
             }
 
             ServerCommunication.NotifyHotSeatPlaylistReset();
 
-            return result;
+            Log.Debug($"New hotlap track picked {hotlap.TrackId}");
+
+            try
+            {
+                File.WriteAllText("./hotlap.json", JsonConvert.SerializeObject(hotlap));
+            }
+            catch (Exception e)
+            {
+                Log.Error($"Unable to write hotlap file: {e}");
+            }
         }
 
         private static string GetHotlapData(Database database)
@@ -141,20 +156,9 @@ namespace GameServer.Implementation.Common
                 hotLap = JsonConvert.DeserializeObject<HotLapData>(File.ReadAllText("./hotlap.json"));
             else
             {
-                hotLap = GetNewHotLap(database);
-                if (hotLap != null)
-                    File.WriteAllText("./hotlap.json", JsonConvert.SerializeObject(hotLap));
-            }
-
-            if (hotLap != null && hotLap.SelectedAt < DateTime.UtcNow.AddDays(-1))
-            {
-                database.Scores.RemoveRange(database.Scores.Where(match => match.SubGroupId == 700 && match.IsMNR).ToList());
-
-                database.SaveChanges();
-
-                hotLap = GetNewHotLap(database);
-                if (hotLap != null)
-                    File.WriteAllText("./hotlap.json", JsonConvert.SerializeObject(hotLap));
+                GetNewHotLap(database);
+                if (File.Exists("./hotlap.json"))
+                    JsonConvert.DeserializeObject<HotLapData>(File.ReadAllText("./hotlap.json"));
             }
 
             if (hotLap != null)
