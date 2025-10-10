@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace GameServer.Utils
 {
@@ -24,13 +25,18 @@ namespace GameServer.Utils
             if (!Directory.Exists($"UGC/PlayerAvatars/{UserId}/MNR/") && IsMNR)
                 Directory.CreateDirectory($"UGC/PlayerAvatars/{UserId}/MNR/");
 
+            var stream = avatar.avatar.OpenReadStream();
+
+            if (!CheckImage(stream, 256, 256))
+                return;
+
             FileStream file;
 
             if (!IsMNR)
                 file = File.Create($"UGC/PlayerAvatars/{UserId}/{avatar.player_avatar_type.ToString().ToLower()}.png");
             else
                 file = File.Create($"UGC/PlayerAvatars/{UserId}/MNR/{avatar.player_avatar_type.ToString().ToLower()}.png");
-            var stream = avatar.avatar.OpenReadStream();
+            
             stream.CopyTo(file);
             file.Close();
 
@@ -281,15 +287,21 @@ namespace GameServer.Utils
             else
                 return "";
 
-            string hash = BitConverter.ToString(MD5.Create().ComputeHash(fileStream)).Replace("-", "").ToLower();
+            string hash = BitConverter.ToString(MD5.HashData(fileStream)).Replace("-", "").ToLower();
             fileStream.Close();
             return hash;
         }
 
         public static string CalculateMD5(Stream stream)
         {
-            string hash = BitConverter.ToString(MD5.Create().ComputeHash(stream)).Replace("-", "").ToLower();
+            string hash = BitConverter.ToString(MD5.HashData(stream)).Replace("-", "").ToLower();
             stream.Position = 0;
+            return hash;
+        }
+
+        public static string CalculateMD5(string data)
+        {
+            string hash = BitConverter.ToString(MD5.HashData(Encoding.UTF8.GetBytes(data))).Replace("-", "").ToLower();
             return hash;
         }
 
@@ -495,6 +507,30 @@ namespace GameServer.Utils
                 database.SaveChanges();
             }
             else CheckStoryLevelName(database, id);
+        }
+
+        public static bool CheckImage(Stream image, int MaxWidth = 0, int MaxHeight = 0)
+        {
+            ImageInfo info;
+
+            try
+            {
+                info = Image.Identify(image);
+            }
+            catch
+            {
+                image.Position = 0;
+                return false;
+            }
+
+            image.Position = 0;
+
+            if (info == null 
+                || (MaxWidth != 0 && info.Width > MaxWidth) 
+                || (MaxHeight != 0 && info.Height > MaxHeight))
+                return false;
+
+            return true;
         }
     }
 }

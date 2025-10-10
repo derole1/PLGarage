@@ -136,12 +136,16 @@ namespace GameServer.Controllers.Common
             }
             else if (session.Platform == Platform.PSV)
             {
+                float marginOfError = 0.0001f;
+
                 score = database.Scores.FirstOrDefault(match => match.PlayerId == game.host_player_id
                     && match.SubKeyId == game_player_stats.track_idx
                     && match.SubGroupId == (int)game.game_type - 10
                     && match.Platform == session.Platform && match.IsMNR == session.IsMNR
-                    && match.Latitude.ToString("0.000", CultureInfo.InvariantCulture) == game_player_stats.latitude.ToString("0.000", CultureInfo.InvariantCulture)
-                    && match.Longitude.ToString("0.000", CultureInfo.InvariantCulture) == game_player_stats.longitude.ToString("0.000", CultureInfo.InvariantCulture));
+                    && match.Latitude >= game_player_stats.latitude - marginOfError
+                    && match.Latitude <= game_player_stats.latitude + marginOfError 
+                    && match.Longitude >= game_player_stats.longitude - marginOfError
+                    && match.Longitude <= game_player_stats.longitude + marginOfError);
                 if (score == null)
                 {
                     score = database.Scores.FirstOrDefault(match => match.PlayerId == game.host_player_id
@@ -150,6 +154,15 @@ namespace GameServer.Controllers.Common
                         && match.Platform == session.Platform && match.IsMNR == session.IsMNR
                         && match.LocationTag == null);
                 }
+
+                if (game_player_stats.location_tag != null)
+                    foreach (var dbscore in database.Scores.Where(match => match.PlayerId == game.host_player_id
+                        && match.Platform == session.Platform
+                        && match.Latitude >= game_player_stats.latitude - marginOfError
+                        && match.Latitude <= game_player_stats.latitude + marginOfError
+                        && match.Longitude >= game_player_stats.longitude - marginOfError
+                        && match.Longitude <= game_player_stats.longitude + marginOfError))
+                            dbscore.LocationTag = game_player_stats.location_tag;
             }
             else
             {
@@ -159,7 +172,7 @@ namespace GameServer.Controllers.Common
                     && match.Platform == session.Platform && match.IsMNR == session.IsMNR);
             }
 
-            database.PlayerCreationRacesStarted.Add(new PlayerCreationRaceStarted { PlayerCreationId = game.track_idx, StartedAt = DateTime.UtcNow });
+            database.PlayerCreationRacesStarted.Add(new PlayerCreationRaceStarted { PlayerCreationId = game.track_idx, StartedAt = TimeUtils.Now });
             Track.RacesFinished++;
             if (game_player_stats.is_winner == 1)
                 Track.RacesWon++;
@@ -233,7 +246,7 @@ namespace GameServer.Controllers.Common
                             Description = $"{game_player_stats.finish_time}",
                             PlayerId = 0,
                             PlayerCreationId = Track.PlayerCreationId,
-                            CreatedAt = DateTime.UtcNow,
+                            CreatedAt = TimeUtils.Now,
                             AllusionId = Track.PlayerCreationId,
                             AllusionType = "PlayerCreation::Track"
                         });
@@ -249,7 +262,7 @@ namespace GameServer.Controllers.Common
                             Description = $"{game_player_stats.score}",
                             PlayerId = 0,
                             PlayerCreationId = Track.PlayerCreationId,
-                            CreatedAt = DateTime.UtcNow,
+                            CreatedAt = TimeUtils.Now,
                             AllusionId = Track.PlayerCreationId,
                             AllusionType = "PlayerCreation::Track"
                         });
@@ -273,7 +286,7 @@ namespace GameServer.Controllers.Common
                 if (score.FinishTime > game_player_stats.finish_time)
                 {
                     score.FinishTime = game_player_stats.finish_time;
-                    score.UpdatedAt = DateTime.UtcNow;
+                    score.UpdatedAt = TimeUtils.Now;
                     score.CharacterIdx = game_player_stats.character_idx;
                     score.KartIdx = game_player_stats.kart_idx;
                     SaveGhost = true;
@@ -281,30 +294,24 @@ namespace GameServer.Controllers.Common
                 if (score.Points < game_player_stats.score)
                 {
                     score.Points = game_player_stats.score;
-                    score.UpdatedAt = DateTime.UtcNow;
+                    score.UpdatedAt = TimeUtils.Now;
                 }
                 if (score.BestLapTime > game_player_stats.best_lap_time)
                 {
                     score.BestLapTime = game_player_stats.best_lap_time;
-                    score.UpdatedAt = DateTime.UtcNow;
+                    score.UpdatedAt = TimeUtils.Now;
                     score.CharacterIdx = game_player_stats.character_idx;
                     score.KartIdx = game_player_stats.kart_idx;
                     SaveGhost = true;
                 }
                 if (SaveGhost)
                     score.GhostCarDataMD5 = GhostDataMD5;
-                if (session.Platform == Platform.PSV && SaveGhost)
-                {
-                    score.Latitude = game_player_stats.latitude;
-                    score.Longitude = game_player_stats.longitude;
-                    score.LocationTag = game_player_stats.location_tag;
-                }
             }
             else
             {
                 database.Scores.Add(new Score
                 {
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = TimeUtils.Now,
                     FinishTime = game_player_stats.finish_time,
                     Platform = session.Platform,
                     PlayerId = game.host_player_id,
@@ -312,7 +319,7 @@ namespace GameServer.Controllers.Common
                     Points = game_player_stats.score,
                     SubGroupId = session.IsMNR ? (int)game.game_type - 10 : (int)game.game_type,
                     SubKeyId = game.track_idx,
-                    UpdatedAt = DateTime.UtcNow,
+                    UpdatedAt = TimeUtils.Now,
                     Latitude = game_player_stats.latitude,
                     Longitude = game_player_stats.longitude,
                     BestLapTime = game_player_stats.best_lap_time,

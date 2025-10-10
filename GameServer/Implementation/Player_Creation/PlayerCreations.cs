@@ -10,6 +10,7 @@ using GameServer.Models.PlayerData.PlayerCreations;
 using GameServer.Implementation.Common;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using System.IO;
 
 namespace GameServer.Implementation.Player_Creation
 {
@@ -63,7 +64,7 @@ namespace GameServer.Implementation.Player_Creation
             Creation.Difficulty = PlayerCreation.difficulty;
             Creation.DLCKeys = PlayerCreation.dlc_keys;
             Creation.IsRemixable = PlayerCreation.is_remixable;
-            Creation.LastPublished = DateTime.UtcNow;
+            Creation.LastPublished = TimeUtils.Now;
             Creation.LevelMode = PlayerCreation.level_mode;
             Creation.LongestDrift = PlayerCreation.longest_drift;
             Creation.LongestHangTime = PlayerCreation.longest_hang_time;
@@ -79,7 +80,7 @@ namespace GameServer.Implementation.Player_Creation
             Creation.Tags = PlayerCreation.tags;
             Creation.TrackTheme = PlayerCreation.track_theme;
             Creation.Type = PlayerCreation.player_creation_type;
-            Creation.UpdatedAt = DateTime.UtcNow;
+            Creation.UpdatedAt = TimeUtils.Now;
             Creation.UserTags = PlayerCreation.user_tags;
             Creation.WeaponSet = PlayerCreation.weapon_set;
             Creation.Version++;
@@ -95,7 +96,7 @@ namespace GameServer.Implementation.Player_Creation
                     Description = "",
                     PlayerId = 0,
                     PlayerCreationId = Creation.PlayerCreationId,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = TimeUtils.Now,
                     AllusionId = Creation.PlayerCreationId,
                     AllusionType = "PlayerCreation::Track"
                 });
@@ -131,13 +132,28 @@ namespace GameServer.Implementation.Player_Creation
         public static string CreatePlayerCreation(Database database, Guid SessionID, PlayerCreation Creation)
         {
             var session = Session.GetSession(SessionID);
-            int id = database.PlayerCreations.Count(match => match.Type != PlayerCreationType.STORY) + 10000;
             var user = database.Users.FirstOrDefault(match => match.Username == session.Username);
-            var deletedCreation = database.PlayerCreations.FirstOrDefault(match => match.Type == PlayerCreationType.DELETED 
-                && ((match.Name == Creation.player_creation_type.ToString() && match.IsMNR == session.IsMNR
-                && match.Platform == session.Platform) || (match.Name == null && !session.IsMNR)));
+            
+            Stream data = null;
+            Stream preview = null;
 
-            if (user == null)
+            if (Creation.player_creation_type != PlayerCreationType.DELETED)
+                data = Creation.data.OpenReadStream();
+
+            if (Creation.player_creation_type != PlayerCreationType.PHOTO
+                && Creation.player_creation_type != PlayerCreationType.PLANET
+                && Creation.player_creation_type != PlayerCreationType.DELETED)
+                preview = Creation.preview.OpenReadStream();
+
+            if (user == null || Creation.player_creation_type == PlayerCreationType.DELETED
+                || (Creation.player_creation_type == PlayerCreationType.PHOTO
+                    && !UserGeneratedContentUtils.CheckImage(data)) //check if photo is a valid image
+                || (Creation.player_creation_type != PlayerCreationType.PHOTO 
+                    && UserGeneratedContentUtils.CheckImage(data)) //check if data for player creation is an image
+                || (Creation.player_creation_type != PlayerCreationType.PLANET 
+                    && Creation.player_creation_type != PlayerCreationType.PHOTO 
+                    && !UserGeneratedContentUtils.CheckImage(preview, 256, 256)) //check if preview for player creation is valid image
+                )
             {
                 var errorResp = new Response<EmptyResponse>
                 {
@@ -160,26 +176,8 @@ namespace GameServer.Implementation.Player_Creation
                 return errorResp.Serialize();
             }
 
-            if (deletedCreation != null)
+            var playerCreation = new PlayerCreationData
             {
-                id = deletedCreation.PlayerCreationId;
-                database.Remove(deletedCreation);
-            }
-            else
-            {
-                //Check if id is not used by something...
-                bool IsAvailable = false;
-                while (!IsAvailable)
-                {
-                    var check = database.PlayerCreations.FirstOrDefault(match => match.PlayerCreationId == id);
-                    IsAvailable = check == null || (check != null && check.Type == PlayerCreationType.DELETED);
-                    if (!IsAvailable) id++;
-                }
-            }
-
-            database.PlayerCreations.Add(new PlayerCreationData
-            {
-                PlayerCreationId = id,
                 AI = Creation.ai,
                 AssociatedCoordinates = Creation.associated_coordinates,
                 AssociatedItemIds = Creation.associated_item_ids,
@@ -189,14 +187,14 @@ namespace GameServer.Implementation.Player_Creation
                 BattleFriendlyFire = Creation.battle_friendly_fire,
                 BattleKillCount = Creation.battle_kill_count,
                 BattleTimeLimit = Creation.battle_time_limit,
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = TimeUtils.Now,
                 Description = Creation.description,
                 Difficulty = Creation.difficulty,
                 DLCKeys = Creation.dlc_keys,
-                FirstPublished = DateTime.UtcNow,
+                FirstPublished = TimeUtils.Now,
                 IsRemixable = Creation.is_remixable,
                 IsTeamPick = Creation.is_team_pick,
-                LastPublished = DateTime.UtcNow,
+                LastPublished = TimeUtils.Now,
                 LevelMode = Creation.level_mode,
                 LongestDrift = Creation.longest_drift,
                 LongestHangTime = Creation.longest_hang_time,
@@ -213,18 +211,29 @@ namespace GameServer.Implementation.Player_Creation
                 Tags = Creation.tags,
                 TrackTheme = Creation.track_theme,
                 Type = Creation.player_creation_type,
-                UpdatedAt = DateTime.UtcNow,
+                UpdatedAt = TimeUtils.Now,
                 UserTags = Creation.user_tags,
                 WeaponSet = Creation.weapon_set,
-                TrackId = Creation.track_id == 0 ? id : Creation.track_id,
+                TrackId = Creation.track_id,
                 Version = 1,
                 //MNR
                 IsMNR = session.IsMNR,
-                ParentCreationId = database.PlayerCreations.FirstOrDefault(match => match.PlayerCreationId == Creation.parent_creation_id) != null || Creation.parent_creation_id < 10000 ? Creation.parent_creation_id : 0,
-                ParentPlayerId = database.Users.FirstOrDefault(match => match.UserId == Creation.parent_player_id) != null ? Creation.parent_player_id == 0 ? Creation.parent_player_id : Creation.parent_player_id : 0,
-                OriginalPlayerId = database.Users.FirstOrDefault(match => match.UserId == Creation.original_player_id) != null ? Creation.original_player_id == 0 ? Creation.original_player_id : user.UserId : user.UserId,
+                ParentCreationId = database.PlayerCreations.Any(match => match.PlayerCreationId == Creation.parent_creation_id) || Creation.parent_creation_id < 10000 ? Creation.parent_creation_id : 0,
+                ParentPlayerId = database.Users.Any(match => match.UserId == Creation.parent_player_id) ? Creation.parent_player_id : user.UserId,
+                OriginalPlayerId = database.Users.Any(match => match.UserId == Creation.original_player_id) ? Creation.original_player_id : user.UserId,
                 BestLapTime = Creation.best_lap_time
-            });
+            };
+            database.PlayerCreations.Add(playerCreation);
+            database.SaveChanges();
+
+            if (playerCreation.TrackId == 0)
+            {
+                playerCreation.TrackId = playerCreation.PlayerCreationId;
+                database.PlayerCreations.Update(playerCreation);
+                database.SaveChanges();
+            }
+
+            var id = playerCreation.PlayerCreationId;
 
             if (Creation.player_creation_type == PlayerCreationType.TRACK && !session.IsMNR)
             {
@@ -237,7 +246,7 @@ namespace GameServer.Implementation.Player_Creation
                     Description = "",
                     PlayerId = 0,
                     PlayerCreationId = id,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = TimeUtils.Now,
                     AllusionId = id,
                     AllusionType = "PlayerCreation::Track"
                 });
@@ -247,14 +256,11 @@ namespace GameServer.Implementation.Player_Creation
 
 
             if (Creation.player_creation_type == PlayerCreationType.PHOTO)
-                UserGeneratedContentUtils.SavePlayerPhoto(id,
-                   Creation.data.OpenReadStream());
+                UserGeneratedContentUtils.SavePlayerPhoto(id, data);
             else if (Creation.player_creation_type == PlayerCreationType.PLANET)
-                UserGeneratedContentUtils.SavePlayerCreation(id, Creation.data.OpenReadStream());
+                UserGeneratedContentUtils.SavePlayerCreation(id, data);
             else
-                UserGeneratedContentUtils.SavePlayerCreation(id,
-                   Creation.data.OpenReadStream(),
-                   Creation.preview.OpenReadStream());
+                UserGeneratedContentUtils.SavePlayerCreation(id, data, preview);
 
             if (Creation.player_creation_type == PlayerCreationType.PLANET)
             {
@@ -368,15 +374,15 @@ namespace GameServer.Implementation.Player_Creation
             {
                 if (IsCounted && !download)
                 {
-                    database.PlayerCreationViews.Add(new PlayerCreationView { PlayerCreationId = Creation.PlayerCreationId, ViewedAt = DateTime.UtcNow });
+                    database.PlayerCreationViews.Add(new PlayerCreationView { PlayerCreationId = Creation.PlayerCreationId, ViewedAt = TimeUtils.Now });
                     database.SaveChanges();
                 }
 
                 if (IsCounted && download)
                 {
                     var uniqueRacer = database.PlayerCreationUniqueRacers.FirstOrDefault(match => match.PlayerId == User.UserId);
-                    database.PlayerCreationDownloads.Add(new PlayerCreationDownload { PlayerCreationId = Creation.PlayerCreationId, DownloadedAt = DateTime.UtcNow });
-                    database.PlayerCreationPoints.Add(new PlayerCreationPoint { PlayerCreationId = Creation.PlayerCreationId, PlayerId = Creation.PlayerId, Platform = Creation.Platform, Type = Creation.Type, CreatedAt = DateTime.UtcNow, Amount = 100 });
+                    database.PlayerCreationDownloads.Add(new PlayerCreationDownload { PlayerCreationId = Creation.PlayerCreationId, DownloadedAt = TimeUtils.Now });
+                    database.PlayerCreationPoints.Add(new PlayerCreationPoint { PlayerCreationId = Creation.PlayerCreationId, PlayerId = Creation.PlayerId, Platform = Creation.Platform, Type = Creation.Type, CreatedAt = TimeUtils.Now, Amount = 100 });
 
                     if (uniqueRacer == null)
                     {
@@ -397,7 +403,7 @@ namespace GameServer.Implementation.Player_Creation
                                 Description = "",
                                 PlayerId = 0,
                                 PlayerCreationId = Creation.PlayerCreationId,
-                                CreatedAt = DateTime.UtcNow,
+                                CreatedAt = TimeUtils.Now,
                                 AllusionId = Creation.PlayerCreationId,
                                 AllusionType = "PlayerCreation::Track"
                             });
@@ -410,7 +416,7 @@ namespace GameServer.Implementation.Player_Creation
                                 Description = "",
                                 PlayerId = 0,
                                 PlayerCreationId = Creation.PlayerCreationId,
-                                CreatedAt = DateTime.UtcNow,
+                                CreatedAt = TimeUtils.Now,
                                 AllusionId = Creation.PlayerCreationId,
                                 AllusionType = "PlayerCreation::Track"
                             });
@@ -419,7 +425,7 @@ namespace GameServer.Implementation.Player_Creation
 
                     if (uniqueRacer != null && uniqueRacer.Version != Creation.Version)
                     {
-                        database.PlayerCreationDownloads.Add(new PlayerCreationDownload { PlayerCreationId = Creation.PlayerCreationId, DownloadedAt = DateTime.UtcNow });
+                        database.PlayerCreationDownloads.Add(new PlayerCreationDownload { PlayerCreationId = Creation.PlayerCreationId, DownloadedAt = TimeUtils.Now });
                         if (!session.IsMNR)
                         {
                             database.ActivityLog.Add(new ActivityEvent
@@ -431,7 +437,7 @@ namespace GameServer.Implementation.Player_Creation
                                 Description = "",
                                 PlayerId = 0,
                                 PlayerCreationId = Creation.PlayerCreationId,
-                                CreatedAt = DateTime.UtcNow,
+                                CreatedAt = TimeUtils.Now,
                                 AllusionId = Creation.PlayerCreationId,
                                 AllusionType = "PlayerCreation::Track"
                             });
@@ -444,7 +450,7 @@ namespace GameServer.Implementation.Player_Creation
                                 Description = "",
                                 PlayerId = 0,
                                 PlayerCreationId = Creation.PlayerCreationId,
-                                CreatedAt = DateTime.UtcNow,
+                                CreatedAt = TimeUtils.Now,
                                 AllusionId = Creation.PlayerCreationId,
                                 AllusionType = "PlayerCreation::Track"
                             });
@@ -662,14 +668,14 @@ namespace GameServer.Implementation.Player_Creation
                 case SortColumn.races_started_this_week:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.RacesStarted.Count(match => match.StartedAt >= DateTime.UtcNow.AddDays(-7) && match.StartedAt <= DateTime.UtcNow)) : 
-                            creationQuery.OrderByDescending(match => match.RacesStarted.Count(match => match.StartedAt >= DateTime.UtcNow.AddDays(-7) && match.StartedAt <= DateTime.UtcNow));
+                            creationQuery.OrderBy(match => match.RacesStarted.Count(match => match.StartedAt >= TimeUtils.ThisWeekStart)) : 
+                            creationQuery.OrderByDescending(match => match.RacesStarted.Count(match => match.StartedAt >= TimeUtils.ThisWeekStart));
                     break;
                 case SortColumn.races_started_this_month:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.RacesStarted.Count(match => match.StartedAt >= DateTime.UtcNow.AddMonths(-1) && match.StartedAt <= DateTime.UtcNow)) :
-                            creationQuery.OrderByDescending(match => match.RacesStarted.Count(match => match.StartedAt >= DateTime.UtcNow.AddMonths(-1) && match.StartedAt <= DateTime.UtcNow));
+                            creationQuery.OrderBy(match => match.RacesStarted.Count(match => match.StartedAt >= TimeUtils.ThisMonthStart)) :
+                            creationQuery.OrderByDescending(match => match.RacesStarted.Count(match => match.StartedAt >= TimeUtils.ThisMonthStart));
                     break;
 
                 //highest rated
@@ -682,14 +688,14 @@ namespace GameServer.Implementation.Player_Creation
                 case SortColumn.rating_up_this_week:
                     creationQuery =
                         sort_order == SortOrder.asc ? 
-                            creationQuery.OrderBy(match => match.Ratings.Count(match => match.Type == RatingType.YAY && match.RatedAt >= DateTime.UtcNow.AddDays(-7) && match.RatedAt <= DateTime.UtcNow)) : 
-                            creationQuery.OrderByDescending(match => match.Ratings.Count(match => match.Type == RatingType.YAY && match.RatedAt >= DateTime.UtcNow.AddDays(-7) && match.RatedAt <= DateTime.UtcNow));
+                            creationQuery.OrderBy(match => match.Ratings.Count(match => match.Type == RatingType.YAY && match.RatedAt >= TimeUtils.ThisWeekStart)) : 
+                            creationQuery.OrderByDescending(match => match.Ratings.Count(match => match.Type == RatingType.YAY && match.RatedAt >= TimeUtils.ThisWeekStart));
                     break;
                 case SortColumn.rating_up_this_month:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.Ratings.Count(match => match.Type == RatingType.YAY && match.RatedAt >= DateTime.UtcNow.AddMonths(-1) && match.RatedAt <= DateTime.UtcNow)) :
-                            creationQuery.OrderByDescending(match => match.Ratings.Count(match => match.Type == RatingType.YAY && match.RatedAt >= DateTime.UtcNow.AddMonths(-1) && match.RatedAt <= DateTime.UtcNow));
+                            creationQuery.OrderBy(match => match.Ratings.Count(match => match.Type == RatingType.YAY && match.RatedAt >= TimeUtils.ThisMonthStart)) :
+                            creationQuery.OrderByDescending(match => match.Ratings.Count(match => match.Type == RatingType.YAY && match.RatedAt >= TimeUtils.ThisMonthStart));
                     break;
 
                 //most hearted
@@ -702,14 +708,14 @@ namespace GameServer.Implementation.Player_Creation
                 case SortColumn.hearts_this_week:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.Hearts.Count(match => match.HeartedAt >= DateTime.UtcNow.AddDays(-7) && match.HeartedAt <= DateTime.UtcNow)) :
-                            creationQuery.OrderByDescending(match => match.Hearts.Count(match => match.HeartedAt >= DateTime.UtcNow.AddDays(-7) && match.HeartedAt <= DateTime.UtcNow));
+                            creationQuery.OrderBy(match => match.Hearts.Count(match => match.HeartedAt >= TimeUtils.ThisWeekStart)) :
+                            creationQuery.OrderByDescending(match => match.Hearts.Count(match => match.HeartedAt >= TimeUtils.ThisWeekStart));
                     break;
                 case SortColumn.hearts_this_month:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.Hearts.Count(match => match.HeartedAt >= DateTime.UtcNow.AddMonths(-1) && match.HeartedAt <= DateTime.UtcNow)) :
-                            creationQuery.OrderByDescending(match => match.Hearts.Count(match => match.HeartedAt >= DateTime.UtcNow.AddMonths(-1) && match.HeartedAt <= DateTime.UtcNow));
+                            creationQuery.OrderBy(match => match.Hearts.Count(match => match.HeartedAt >= TimeUtils.ThisMonthStart)) :
+                            creationQuery.OrderByDescending(match => match.Hearts.Count(match => match.HeartedAt >= TimeUtils.ThisMonthStart));
                     break;
 
                 //MNR
@@ -730,26 +736,26 @@ namespace GameServer.Implementation.Player_Creation
                 case SortColumn.points_today:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.Points.Where(match => match.CreatedAt >= DateTime.UtcNow.Date && match.CreatedAt <= DateTime.UtcNow).Sum(p => p.Amount)) :
-                            creationQuery.OrderByDescending(match => match.Points.Where(match => match.CreatedAt >= DateTime.UtcNow.Date && match.CreatedAt <= DateTime.UtcNow).Sum(p => p.Amount));
+                            creationQuery.OrderBy(match => match.Points.Where(match => match.CreatedAt >= TimeUtils.DayStart).Sum(p => p.Amount)) :
+                            creationQuery.OrderByDescending(match => match.Points.Where(match => match.CreatedAt >= TimeUtils.DayStart).Sum(p => p.Amount));
                     break;
                 case SortColumn.points_yesterday:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.Points.Where(match => match.CreatedAt >= DateTime.UtcNow.AddDays(-1).Date && match.CreatedAt <= DateTime.UtcNow.Date).Sum(p => p.Amount)) :
-                            creationQuery.OrderByDescending(match => match.Points.Where(match => match.CreatedAt >= DateTime.UtcNow.AddDays(-1).Date && match.CreatedAt <= DateTime.UtcNow.Date).Sum(p => p.Amount));
+                            creationQuery.OrderBy(match => match.Points.Where(match => match.CreatedAt >= TimeUtils.YesterdayStart && match.CreatedAt < TimeUtils.DayStart).Sum(p => p.Amount)) :
+                            creationQuery.OrderByDescending(match => match.Points.Where(match => match.CreatedAt >= TimeUtils.YesterdayStart && match.CreatedAt < TimeUtils.DayStart).Sum(p => p.Amount));
                     break;
                 case SortColumn.points_this_week:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderByDescending(match => match.Points.Where(match => match.CreatedAt >= DateTime.UtcNow.AddDays(-7) && match.CreatedAt <= DateTime.UtcNow).Sum(p => p.Amount)) :
-                            creationQuery.OrderBy(match => match.Points.Where(match => match.CreatedAt >= DateTime.UtcNow.AddDays(-7) && match.CreatedAt <= DateTime.UtcNow).Sum(p => p.Amount));
+                            creationQuery.OrderByDescending(match => match.Points.Where(match => match.CreatedAt >= TimeUtils.ThisWeekStart).Sum(p => p.Amount)) :
+                            creationQuery.OrderBy(match => match.Points.Where(match => match.CreatedAt >= TimeUtils.ThisWeekStart).Sum(p => p.Amount));
                     break;
                 case SortColumn.points_last_week:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.Points.Where(match => match.CreatedAt >= DateTime.UtcNow.AddDays(-14) && match.CreatedAt <= DateTime.UtcNow.AddDays(-7)).Sum(p => p.Amount)) :
-                            creationQuery.OrderByDescending(match => match.Points.Where(match => match.CreatedAt >= DateTime.UtcNow.AddDays(-14) && match.CreatedAt <= DateTime.UtcNow.AddDays(-7)).Sum(p => p.Amount));
+                            creationQuery.OrderBy(match => match.Points.Where(match => match.CreatedAt >= TimeUtils.LastWeekStart && match.CreatedAt < TimeUtils.ThisWeekStart).Sum(p => p.Amount)) :
+                            creationQuery.OrderByDescending(match => match.Points.Where(match => match.CreatedAt >= TimeUtils.LastWeekStart && match.CreatedAt < TimeUtils.ThisWeekStart).Sum(p => p.Amount));
                     break;
 
                 //download
@@ -762,14 +768,14 @@ namespace GameServer.Implementation.Player_Creation
                 case SortColumn.downloads_this_week:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.Downloads.Count(match => match.DownloadedAt >= DateTime.UtcNow.AddDays(-7) && match.DownloadedAt <= DateTime.UtcNow)) :
-                            creationQuery.OrderByDescending(match => match.Downloads.Count(match => match.DownloadedAt >= DateTime.UtcNow.AddDays(-7) && match.DownloadedAt <= DateTime.UtcNow));
+                            creationQuery.OrderBy(match => match.Downloads.Count(match => match.DownloadedAt >= TimeUtils.ThisWeekStart)) :
+                            creationQuery.OrderByDescending(match => match.Downloads.Count(match => match.DownloadedAt >= TimeUtils.ThisWeekStart));
                     break;
                 case SortColumn.downloads_last_week:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.Downloads.Count(match => match.DownloadedAt >= DateTime.UtcNow.AddDays(-14) && match.DownloadedAt <= DateTime.UtcNow.AddDays(-7))) :
-                            creationQuery.OrderByDescending(match => match.Downloads.Count(match => match.DownloadedAt >= DateTime.UtcNow.AddDays(-14) && match.DownloadedAt <= DateTime.UtcNow.AddDays(-7)));
+                            creationQuery.OrderBy(match => match.Downloads.Count(match => match.DownloadedAt >= TimeUtils.LastWeekStart && match.DownloadedAt < TimeUtils.ThisWeekStart)) :
+                            creationQuery.OrderByDescending(match => match.Downloads.Count(match => match.DownloadedAt >= TimeUtils.LastWeekStart && match.DownloadedAt < TimeUtils.ThisWeekStart));
                     break;
 
                 //views
@@ -782,14 +788,14 @@ namespace GameServer.Implementation.Player_Creation
                 case SortColumn.views_this_week:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.Views.Count(match => match.ViewedAt >= DateTime.UtcNow.AddDays(-7) && match.ViewedAt <= DateTime.UtcNow)) :
-                            creationQuery.OrderByDescending(match => match.Views.Count(match => match.ViewedAt >= DateTime.UtcNow.AddDays(-7) && match.ViewedAt <= DateTime.UtcNow));
+                            creationQuery.OrderBy(match => match.Views.Count(match => match.ViewedAt >= TimeUtils.ThisWeekStart)) :
+                            creationQuery.OrderByDescending(match => match.Views.Count(match => match.ViewedAt >= TimeUtils.ThisWeekStart));
                     break;
                 case SortColumn.views_last_week:
                     creationQuery =
                         sort_order == SortOrder.asc ?
-                            creationQuery.OrderBy(match => match.Views.Count(match => match.ViewedAt >= DateTime.UtcNow.AddDays(-14) && match.ViewedAt <= DateTime.UtcNow.AddDays(-7))) :
-                            creationQuery.OrderByDescending(match => match.Views.Count(match => match.ViewedAt >= DateTime.UtcNow.AddDays(-14) && match.ViewedAt <= DateTime.UtcNow.AddDays(-7)));
+                            creationQuery.OrderBy(match => match.Views.Count(match => match.ViewedAt >= TimeUtils.LastWeekStart && match.ViewedAt < TimeUtils.ThisWeekStart)) :
+                            creationQuery.OrderByDescending(match => match.Views.Count(match => match.ViewedAt >= TimeUtils.LastWeekStart && match.ViewedAt < TimeUtils.ThisWeekStart));
                     break;
             }
 
@@ -929,15 +935,11 @@ namespace GameServer.Implementation.Player_Creation
             IQueryable<PlayerCreationData> photosQuery = database.PlayerCreations
                                                             .Include(x => x.Author)
                                                             .Where(match => match.Type == PlayerCreationType.PHOTO);
-            int player_id = 0;
-            var user = database.Users.FirstOrDefault(match => match.Username == username);
-            if (user != null)
-                player_id = user.UserId;
 
             if (associated_usernames != null)
                 photosQuery = photosQuery.Where(match => match.AssociatedUsernames.Contains(associated_usernames));
             if (username != null)
-                photosQuery = photosQuery.Where(match => match.PlayerId == player_id);
+                photosQuery = photosQuery.Where(match => match.Author.Username == username);
             if (track_id != null)
                 photosQuery = photosQuery.Where(match => match.TrackId == track_id);
 
@@ -956,7 +958,7 @@ namespace GameServer.Implementation.Player_Creation
 
             var photos = photosQuery
                 .Skip(pageStart)
-                .Take(pageEnd - pageStart)
+                .Take(per_page)
                 .ToList();
 
             var PhotoList = new List<Photo>(photos.Select(photo => new Photo
@@ -1129,7 +1131,7 @@ namespace GameServer.Implementation.Player_Creation
                                 creator_username = Author != null ? Author.Username : "",
                                 creator_id = Activity.AuthorId,
                                 timestamp = Activity.CreatedAt.ToString("yyyy-MM-ddThh:mm:sszzz"),
-                                seconds_ago = (int)new TimeSpan(DateTime.UtcNow.Ticks - Activity.CreatedAt.Ticks).TotalSeconds,
+                                seconds_ago = TimeUtils.SecondsAgo(Activity.CreatedAt),
                                 tags = Activity.Tags,
                                 allusion_type = Activity.AllusionType,
                                 allusion_id = Activity.AllusionId,
