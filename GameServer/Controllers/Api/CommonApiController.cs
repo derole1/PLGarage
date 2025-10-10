@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using GameServer.Implementation.Common;
 using GameServer.Models.Config;
@@ -9,6 +10,7 @@ using GameServer.Models.PlayerData.PlayerCreations;
 using GameServer.Utils;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Primitives;
@@ -20,11 +22,15 @@ namespace GameServer.Controllers.Api
     {
         private readonly Database database;
         private readonly SignInManager<IdentityUser> signInManager;
+        private readonly UserManager<IdentityUser> userManager;
+        private readonly IUserStore<IdentityUser> userStore;
 
-        public CommonApiController(Database database, SignInManager<IdentityUser> signInManager)
+        public CommonApiController(Database database, SignInManager<IdentityUser> signInManager, UserManager<IdentityUser> userManager, IUserStore<IdentityUser> userStore)
         {
             this.database = database;
             this.signInManager = signInManager;
+            this.userManager = userManager;
+            this.userStore = userStore;
         }
 
         [HttpGet]
@@ -88,19 +94,38 @@ namespace GameServer.Controllers.Api
         public IActionResult PlayerCount()
         {
             return Content(Session.GetSessions()
+                .Where(x => x.LastPing.AddMinutes(1) < DateTime.UtcNow)
                 .Count()
                 .ToString());
         }
 
         [HttpPost]
         [Route("api/login")]
-        public async Task<IActionResult> Login(string login, string password)
+        public async Task<IActionResult> Login(string username, string password)
         {
-            var result = await signInManager.PasswordSignInAsync(login, password, false, false);
+            var result = await signInManager.PasswordSignInAsync(username, password, false, false);
             if (result.Succeeded)
                 return Ok();
             else
                 return Unauthorized();
+        }
+
+        [HttpPost]
+        [Route("api/register")]
+        public async Task<IActionResult> Register(string username, string password)
+        {
+            if (!ServerConfig.Instance.EnableAccountRegistration)
+                return Forbid();
+
+            var user = Activator.CreateInstance<IdentityUser>();
+
+            await userStore.SetUserNameAsync(user, username, CancellationToken.None);
+            var result = await userManager.CreateAsync(user, password);
+
+            if (result.Succeeded)
+                return Ok();
+            else
+                return BadRequest();
         }
 
         [HttpPost]

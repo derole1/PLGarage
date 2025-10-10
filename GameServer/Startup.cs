@@ -28,6 +28,7 @@ namespace GameServer
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
+            services.AddCors();
             services.AddControllers();
             services.AddDbContext<Database>();
 
@@ -66,7 +67,13 @@ namespace GameServer
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env, IHostApplicationLifetime appLifetime)
         {
             if (env.IsDevelopment())
+            {
+                app.UseCors(options =>
+                {
+                    options.AllowAnyOrigin();
+                });
                 app.UseDeveloperExceptionPage();
+            }
 
             if (env.IsDevelopment() || ServerConfig.Instance.EnableRequestLogging)
             {

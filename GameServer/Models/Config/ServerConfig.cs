@@ -48,6 +48,7 @@ namespace GameServer.Models.Config
         public bool EnableRequestLogging = false;
         public bool EnablePlaceholderImage = true;
         public bool EnableRateLimiting = true;
+        public bool EnableAccountRegistration = false;
         public int MaxConcurrentRequests = 3;
         public string InstanceName = "PLGarage";
         public string ServerCommunicationKey = "";
